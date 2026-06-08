@@ -1,0 +1,23 @@
+Load
+    Energy_Consumption: Energy Consumed from the entire building in a quarter (kWh)
+PV
+    Energy_Generation: Energy Produced in a quarter (kWh)
+
+Battery
+    Energy_Flow_Quarter: Energy charged or discharged in a quarter (kWh)
+
+Weather
+	Temperature_v1: Temperature (°C) from Online Weather API #1	
+	Relative_Humidity_v1: Relative Humidity (%) from Online Weather API #1	 	
+	Wind_Speed_v1: Wind Speed (km/h) from Online Weather API #1		
+	Clouds_v1: Cloud Covererage (%) from Online Weather API #1		
+	Clouds_low: Low-level Cloud Coverage (%) from Online Weather API #1		
+	Clouds_mid: Mid-level Cloud Coverage (%) from Online Weather API #1	
+	Clouds_high: High-level Cloud Coverage (%) from Online Weather API #1	
+	Temperature_v2: Temperature (°C) from Online Weather API #2		
+	Clouds_v2: Cloud Covererage (%) from Online Weather API #2		
+	Relative_Humidity_v2: Relative Humidity (%) from Online Weather API #2	
+	Wind_Speed_v2: Wind Speed (m/s) from Online Weather API #2
+
+Electricity Price
+    SMP: Greek Electricity System Marginal Price (euro/kWh)
