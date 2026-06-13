@@ -21,19 +21,37 @@ from tqdm.auto import tqdm
 
 def run_power_lstm(X_train, y_train, X_val, y_val, X_test, y_test, 
                    horizon_name, horizon, epochs, batch_size, random_state, 
-                   target_scaler=None, train_from_scratch=True):
-    """
-    Uses Bidirectional processing, LayerNormalization (for temporal stability), 
-    Global Average Pooling, and Native Inverse Scaling.
-    """
+                   experiment_name="Power_LSTM",  # <--- ADD THIS
+                   target_scaler=None, train_from_scratch=False):
+    
     lstm_cfg = config.LSTM_CONFIG
     train_cfg = config.TRAINING_PARAMS
-    model_name = "Power_LSTM"
     
-    print(f"\n RUNNING {model_name.upper()} ({horizon_name}) | Horizon: {horizon}")
+    
+    print(f"\n RUNNING {experiment_name.upper()} ({horizon_name}) | Horizon: {horizon}")
     start_time = time.time()
     
-    # Clear memory and set seeds for reproducibility
+    cache_dir = f"../results/{horizon_name}/{experiment_name}"
+    cache_path = os.path.join(cache_dir, "predictions.npz")
+    model_save_path = os.path.join(cache_dir, f"{experiment_name.lower()}_model.keras")
+    
+    # Bypass everything if predictions are already cached
+    if not train_from_scratch and os.path.exists(cache_path):
+        print(f"Cache found! Loading cached inferences from {cache_path}")
+        loaded = np.load(cache_path)
+        
+        # Load model purely for artifact saving purposes if needed
+        model = load_model(model_save_path) if os.path.exists(model_save_path) else "Cached_LSTM"
+        
+        return {
+            'model': model,
+            'predictions': loaded['predictions'],
+            'y_test_real': loaded['y_test_real'],
+            'history': None,
+            'execution_time': loaded['execution_time'].item()
+        }
+    
+    # Clear memory and set seeds
     tf.keras.backend.clear_session()
     tf.random.set_seed(random_state)
     
@@ -41,15 +59,13 @@ def run_power_lstm(X_train, y_train, X_val, y_val, X_test, y_test,
         Input(shape=(X_train.shape[1], X_train.shape[2])),
         
         Bidirectional(LSTM(lstm_cfg["hidden_units"][0], return_sequences=True)),
-        LayerNormalization(), # UPGRADE: LayerNorm instead of BatchNorm
+        LayerNormalization(), 
         Dropout(lstm_cfg["dropout"]),
         
-        # return_sequences=True to prevent the 1D bottleneck
         LSTM(lstm_cfg["hidden_units"][1], return_sequences=True),
         LayerNormalization(), 
         Dropout(lstm_cfg["dropout"]),
         
-        # Compress the 3D sequence gracefully before the Dense layer
         GlobalAveragePooling1D(),
         
         Dense(lstm_cfg["hidden_units"][0], activation='relu'), 
@@ -64,16 +80,14 @@ def run_power_lstm(X_train, y_train, X_val, y_val, X_test, y_test,
         
     model.compile(optimizer=optimizer, loss=loss_fn)
     
-    # So we do not have to train the model again
-    model_save_path = f"../results/{horizon_name}/{model_name}/{model_name.lower()}_model.keras"
     history = None
     
+    # Bypass training if weights exist but npz does not
     if not train_from_scratch and os.path.exists(model_save_path):
         print(f"Loading pre-trained weights from {model_save_path}")
         model = load_model(model_save_path)
     else:
         print(f"Training LSTM for {horizon} steps")
-        # Training Callbacks
         early_stop = EarlyStopping(monitor='val_loss', patience=train_cfg["early_stopping_patience"], restore_best_weights=True)
         lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=train_cfg["lr_reduce_factor"], 
                                          patience=train_cfg["lr_reduce_patience"], min_lr=train_cfg["min_learning_rate"], verbose=1)
@@ -87,14 +101,11 @@ def run_power_lstm(X_train, y_train, X_val, y_val, X_test, y_test,
             verbose=1 
         )
     
-    # GENERATE PREDICTIONS
     print("Generating predictions...")
     test_preds = model.predict(X_test, verbose=0)
     execution_time = time.time() - start_time
     
-    # INVERSE TRANSFORM TO REAL kW
     if target_scaler is not None:
-        # Check if the target arrays are 1D or 2D and handle accordingly
         if len(test_preds.shape) == 1:
             test_preds = test_preds.reshape(-1, 1)
             y_test_reshaped = y_test.reshape(-1, 1)
@@ -105,6 +116,12 @@ def run_power_lstm(X_train, y_train, X_val, y_val, X_test, y_test,
         y_test_unscaled = target_scaler.inverse_transform(y_test_reshaped)
     else:
         y_test_unscaled = y_test
+        
+    # Save cache for instant loading next time
+    os.makedirs(cache_dir, exist_ok=True)
+    np.savez(cache_path, predictions=test_preds, y_test_real=y_test_unscaled, 
+             execution_time=np.array(execution_time))
+    print(f"Inference successfully cached to {cache_path}")
     
     return {
         'model': model,
@@ -113,20 +130,36 @@ def run_power_lstm(X_train, y_train, X_val, y_val, X_test, y_test,
         'history': history,
         'execution_time': execution_time
     }
-
 ################# Vanila Transformer Architecture #################
 
 def run_vanilla_transformer(X_train, y_train, X_val, y_val, X_test, y_test, 
                             horizon_name, horizon, epochs, batch_size, random_state, 
-                            target_scaler=None, train_from_scratch=True):
+                            experiment_name="Vanilla_Transformer", # <--- UPGRADED
+                            target_scaler=None, train_from_scratch=False):
     
     trans_cfg = config.TRANSFORMER_CONFIG
     train_cfg = config.TRAINING_PARAMS
-    model_name = "Vanilla_Transformer"
     
-    print(f"\nRUNNING VANILLA TRANSFORMER ({horizon_name}) | Horizon: {horizon}")
+    print(f"\nRUNNING {experiment_name.upper()} ({horizon_name}) | Horizon: {horizon}")
     start_time = time.time()
     
+    # Cached model
+    cache_dir = f"../results/{horizon_name}/{experiment_name}"
+    cache_path = os.path.join(cache_dir, "predictions.npz")
+    model_save_path = os.path.join(cache_dir, f"{experiment_name.lower()}_model.keras")
+    
+    if not train_from_scratch and os.path.exists(cache_path):
+        print(f"Loading cached inferences from {cache_path}")
+        loaded = np.load(cache_path)
+        model = load_model(model_save_path) if os.path.exists(model_save_path) else "Cached_Transformer"
+        return {
+            'model': model,
+            'predictions': loaded['predictions'],
+            'y_test_real': loaded['y_test_real'],
+            'history': None,
+            'execution_time': loaded['execution_time'].item()
+        }
+
     seq_length = X_train.shape[1]
     num_features = X_train.shape[2]
     d_model = trans_cfg["d_model"]
@@ -136,11 +169,8 @@ def run_vanilla_transformer(X_train, y_train, X_val, y_val, X_test, y_test,
     
     # Transformer Architecture
     inputs = layers.Input(shape=(seq_length, num_features))
-    
-    # Linear projection to d_model space
     x = layers.Dense(d_model)(inputs)
     
-    # Sinusoidal Positional Embedding
     position = np.arange(seq_length)[:, np.newaxis]
     div_term = np.exp(np.arange(0, d_model, 2) * -(np.log(10000.0) / d_model))
     pe = np.zeros((seq_length, d_model))
@@ -150,21 +180,17 @@ def run_vanilla_transformer(X_train, y_train, X_val, y_val, X_test, y_test,
     pos_emb = tf.constant(pe[np.newaxis, :, :], dtype=tf.float32)
     x = x + pos_emb
     
-    # Self-Attention Block
     attn_output = layers.MultiHeadAttention(num_heads=trans_cfg["num_heads"], key_dim=d_model)(x, x)
     x = layers.LayerNormalization(epsilon=1e-6)(x + attn_output)
     
-    # Feed-Forward Network
     ffn = layers.Dense(trans_cfg["ffn_dim"], activation='relu')(x)
     ffn = layers.Dropout(trans_cfg["dropout"])(ffn)
     ffn = layers.Dense(d_model)(ffn)
     x = layers.LayerNormalization(epsilon=1e-6)(x + ffn)
     
-    # Flatten to preserve spatial/temporal mapping
     x = layers.Flatten()(x)
     x = layers.Dropout(trans_cfg["dropout"])(x)
     
-    # Dedicated, wider Output Head mapping
     head_dim = trans_cfg.get("head_dim", 256)
     x = layers.Dense(head_dim, activation='relu')(x)
     outputs = layers.Dense(horizon, activation='linear')(x)
@@ -172,7 +198,6 @@ def run_vanilla_transformer(X_train, y_train, X_val, y_val, X_test, y_test,
     model = Model(inputs=inputs, outputs=outputs)
     optimizer = tf.keras.optimizers.Adam(learning_rate=trans_cfg["learning_rate"])
     
-    # Dynamic Loss Function
     if trans_cfg.get("loss") == "mse":
         loss_fn = 'mse'
     else:
@@ -180,8 +205,6 @@ def run_vanilla_transformer(X_train, y_train, X_val, y_val, X_test, y_test,
         
     model.compile(optimizer=optimizer, loss=loss_fn)
 
-    # So we dont have to retrain
-    model_save_path = f"../results/{horizon_name}/{model_name}/{model_name.lower()}_model.keras"
     history = None
     
     if not train_from_scratch and os.path.exists(model_save_path):
@@ -195,19 +218,15 @@ def run_vanilla_transformer(X_train, y_train, X_val, y_val, X_test, y_test,
 
         history = model.fit(
             X_train, y_train, 
-            epochs=epochs, 
-            batch_size=batch_size, 
+            epochs=epochs, batch_size=batch_size, 
             validation_data=(X_val, y_val),  
-            callbacks=[early_stop, lr_scheduler],
-            verbose=1 
+            callbacks=[early_stop, lr_scheduler], verbose=1 
         )
 
-    # Prediction
-    print("Generating predictions...")
+    print("Generating predictions")
     test_preds = model.predict(X_test, verbose=0)
     execution_time = time.time() - start_time
     
-    # Inverse Transform to kW
     if target_scaler is not None:
         if len(test_preds.shape) == 1:
             test_preds = test_preds.reshape(-1, 1)
@@ -219,6 +238,11 @@ def run_vanilla_transformer(X_train, y_train, X_val, y_val, X_test, y_test,
         y_test_unscaled = target_scaler.inverse_transform(y_test_reshaped)
     else:
         y_test_unscaled = y_test
+    
+    # Save cache
+    os.makedirs(cache_dir, exist_ok=True)
+    np.savez(cache_path, predictions=test_preds, y_test_real=y_test_unscaled, 
+             execution_time=np.array(execution_time))
     
     return {
         'model': model,
@@ -232,16 +256,21 @@ def run_vanilla_transformer(X_train, y_train, X_val, y_val, X_test, y_test,
 
 def run_keras_patchtst(X_train, y_train, X_val, y_val, X_test, y_test, 
                        horizon_name, horizon, epochs, batch_size, 
-                       patch_len, stride, target_idx, random_state, 
-                       target_scaler=None, train_from_scratch=True):
+                       patch_len, stride, target_idx, random_state,
+                       experiment_name="PatchTST",
+                       target_scaler=None, train_from_scratch=False):
     
     patch_cfg = config.PATCHTST_CONFIG
     train_cfg = config.TRAINING_PARAMS
-    model_name = "PatchTST"
     
-    print(f"\nRUNNING PATCHTST ({horizon_name}) | Horizon: {horizon}")
+    print(f"\nRUNNING {experiment_name.upper()} ({horizon_name}) | Horizon: {horizon}")
     start_time = time.time()
     
+    cache_dir = f"../results/{horizon_name}/{experiment_name}"
+    cache_path = os.path.join(cache_dir, "predictions.npz")
+    model_save_path = os.path.join(cache_dir, f"{experiment_name.lower()}_model.keras")
+    
+    # BUILD THE ARCHITECTURE
     seq_length = X_train.shape[1]
     num_features = X_train.shape[2]
     d_model = patch_cfg["d_model"]
@@ -249,17 +278,11 @@ def run_keras_patchtst(X_train, y_train, X_val, y_val, X_test, y_test,
     tf.keras.backend.clear_session()
     tf.random.set_seed(random_state)
     
-    # Architecture
     inputs = layers.Input(shape=(seq_length, num_features))
-    
-    # Channel Independence
     x_ci = layers.Lambda(lambda z: tf.reshape(tf.transpose(z, perm=[0, 2, 1]), [-1, seq_length, 1]))(inputs)
-    
-    # Patching
     x_patched = layers.Conv1D(filters=d_model, kernel_size=patch_len, 
                               strides=stride, padding='valid')(x_ci)
     
-    # Dynamic Sinusoidal Positional Embedding
     num_patches = (seq_length - patch_len) // stride + 1
     position = np.arange(num_patches)[:, np.newaxis]
     div_term = np.exp(np.arange(0, d_model, 2) * -(np.log(10000.0) / d_model))
@@ -270,30 +293,22 @@ def run_keras_patchtst(X_train, y_train, X_val, y_val, X_test, y_test,
     pos_emb = tf.constant(pe[np.newaxis, :, :], dtype=tf.float32)
     x = x_patched + pos_emb
     
-    # Self-Attention Block
     attn_output = layers.MultiHeadAttention(num_heads=patch_cfg["num_heads"], key_dim=d_model)(x, x)
     x = layers.LayerNormalization(epsilon=1e-6)(x + attn_output)
     
-    # Feed-Forward Network
     ffn = layers.Dense(patch_cfg["ffn_dim"], activation='relu')(x)
     ffn = layers.Dropout(patch_cfg["dropout"])(ffn)
     ffn = layers.Dense(d_model)(ffn)
     x = layers.LayerNormalization(epsilon=1e-6)(x + ffn)
     
-    # Clean Output Head 
     x = layers.Flatten()(x)
     x = layers.Dropout(patch_cfg["dropout"])(x)
-    
-    # Map each feature's patches directly to the target horizon independently
     x = layers.Dense(horizon, activation='linear')(x)
-    
-    # Reshape back to features and slice out strictly the target feature
     outputs = layers.Lambda(lambda z: tf.reshape(z, [-1, num_features, horizon])[:, target_idx, :])(x)
     
     model = Model(inputs=inputs, outputs=outputs)
     optimizer = tf.keras.optimizers.Adam(learning_rate=patch_cfg["learning_rate"])
     
-    # Dynamic Loss Function
     if patch_cfg.get("loss") == "mse":
         loss_fn = 'mse'
     else:
@@ -301,13 +316,26 @@ def run_keras_patchtst(X_train, y_train, X_val, y_val, X_test, y_test,
         
     model.compile(optimizer=optimizer, loss=loss_fn)
 
-    # Professor Mode Inference Toggle
-    model_save_path = f"../results/{horizon_name}/{model_name}/{model_name.lower()}_model.keras"
+    # CHECK CACHE (Inject weights directly into the built model)
+    if not train_from_scratch and os.path.exists(cache_path):
+        print(f"Loading cached inferences from {cache_path}")
+        loaded = np.load(cache_path)
+        if os.path.exists(model_save_path):
+            model.load_weights(model_save_path) # <--- Safe load!
+        return {
+            'model': model,
+            'predictions': loaded['predictions'],
+            'y_test_real': loaded['y_test_real'],
+            'history': None,
+            'execution_time': loaded['execution_time'].item()
+        }
+
     history = None
     
+    # TRAINING OR LOADING (If cache is missing)
     if not train_from_scratch and os.path.exists(model_save_path):
         print(f"Loading pre-trained weights from {model_save_path}")
-        model = load_model(model_save_path)
+        model.load_weights(model_save_path) # <--- Safe load!
     else:
         print(f"Training PatchTST for {horizon} steps")
         early_stop = EarlyStopping(monitor='val_loss', patience=train_cfg["early_stopping_patience"], restore_best_weights=True)
@@ -320,13 +348,14 @@ def run_keras_patchtst(X_train, y_train, X_val, y_val, X_test, y_test,
             validation_data=(X_val, y_val), 
             callbacks=[early_stop, lr_scheduler], verbose=1 
         )
+        # Explicitly save model to make sure weights generate
+        os.makedirs(cache_dir, exist_ok=True)
+        model.save(model_save_path)
 
-    # Prediction
     print("Generating predictions")
     test_preds = model.predict(X_test, verbose=0)
     execution_time = time.time() - start_time
     
-    # Inverse Transform to kW
     if target_scaler is not None:
         if len(test_preds.shape) == 1:
             test_preds = test_preds.reshape(-1, 1)
@@ -338,6 +367,11 @@ def run_keras_patchtst(X_train, y_train, X_val, y_val, X_test, y_test,
         y_test_unscaled = target_scaler.inverse_transform(y_test_reshaped)
     else:
         y_test_unscaled = y_test
+    
+    # Save cache
+    os.makedirs(cache_dir, exist_ok=True)
+    np.savez(cache_path, predictions=test_preds, y_test_real=y_test_unscaled,
+             execution_time=np.array(execution_time))
     
     return {
         'model': model,
@@ -355,20 +389,26 @@ class DummyHistory:
 
 def run_chronos_univariate(df, target_col='energy_consumption', horizon_name="15_min",
                            model_name="amazon/chronos-t5-small", batch_size=16, 
-                           context_length=512, train_from_scratch=True):
+                           context_length=512, experiment_name=None,
+                           train_from_scratch=False):
     
     horizon = config.HORIZON_STEPS[horizon_name]
     clean_model_name = model_name.replace("/", "_")
-    print(f"\n{'='*60}\n RUNNING CHRONOS ZERO-SHOT ({clean_model_name}) | Horizon: {horizon}\n{'='*60}")
+    
+    # Use custom experiment name if provided, otherwise default to the clean model name
+    exp_dir_name = experiment_name if experiment_name else clean_model_name
+    
+    print(f"\n RUNNING CHRONOS ZERO-SHOT ({exp_dir_name}) | Horizon: {horizon}")
     
     start_time = time.time()
     
     # Extract Raw Unscaled Data
     y_all = df[target_col].values
     train_size = int(len(y_all) * (config.TRAIN_SPLIT + config.VAL_SPLIT))
-    y_train_raw = y_all[:train_size] # Needed for MASE calculation
+    y_train_raw = y_all[:train_size] 
 
-    cache_dir = f"../results/{horizon_name}/{clean_model_name}"
+    # Cache uses exp_dir_name so context ablations don't overwrite
+    cache_dir = f"../results/{horizon_name}/{exp_dir_name}"
     cache_path = os.path.join(cache_dir, "predictions.npz")
     
     # Load Cached Predictions

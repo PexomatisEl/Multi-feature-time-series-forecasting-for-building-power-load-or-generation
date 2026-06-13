@@ -14,7 +14,7 @@ class ThesisDataPipeline:
         
         # Native resolution of the raw data
         self.native_freq = 15 
-        self.native_steps_per_hour = int(60 / self.native_freq) # Always 4
+        self.native_steps_per_hour = int(60 / self.native_freq)
 
 
     def cross_sensor_patch(self, df):
@@ -148,12 +148,12 @@ class ThesisDataPipeline:
             df_resampled['month_cos'] = np.cos(2 * np.pi * df_resampled.index.month / 12.0)
 
             # Feature Engineering
-            # 1. Temperature times Hour Interaction
+            # Temperature times Hour Interaction
             if 'temperature_v1' in df_resampled.columns:
                 df_resampled['temp_x_hour'] = df_resampled['temperature_v1']*df_resampled['hour_sin']
             
 
-            # 2. Solar PV Profile (Sun angle modified by clouds)
+            # Solar PV Profile (Sun angle modified by clouds)
             if 'clouds_v1' in df_resampled.columns:
                 df['solar_pv_profile'] = df_resampled['hour_cos']*(1-(df_resampled['clouds_v1']/100))
             # Categorical flags

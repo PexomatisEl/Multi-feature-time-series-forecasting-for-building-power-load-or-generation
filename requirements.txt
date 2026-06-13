@@ -1,0 +1,31 @@
+# Deep Learning & Foundation Models
+tensorflow==2.20.0
+torch==2.10.0+cu128
+torchvision==0.25.0+cu128
+neuralforecast==3.1.4
+chronos-forecasting==2.2.2
+timesfm==1.3.0
+uni2ts==2.0.0
+pytorch-forecasting==1.7.0
+transformers==4.57.6
+
+# Data Science & Statistics
+pandas==2.1.4
+numpy==1.26.4
+scipy==1.11.4
+scikit-learn==1.7.2
+statsmodels==0.14.6
+matplotlib==3.10.8
+seaborn==0.13.2
+
+# Optimization & ML
+xgboost==3.1.3
+optuna==4.7.0
+joblib==1.5.3
+
+# Utilities & Infrastructure
+holidays==0.98
+tqdm==4.67.1
+hydra-core==1.3.0
+lightning==2.6.0
+wandb==0.25.1

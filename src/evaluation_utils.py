@@ -9,7 +9,10 @@ import os
 import src.config as config
 import seaborn as sns
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
-import spicy.stats as stats
+import scipy.stats as stats
+from scipy.stats import norm
+from statsmodels.stats.multitest import multipletests
+from IPython.display import display
 
 
 class NpEncoder(json.JSONEncoder):
@@ -141,7 +144,7 @@ def save_experiment_results(results_dict, model_name, horizon_name, y_test, hori
         with open(params_path, "w") as f:
             json.dump(results_dict["best_params"], f, indent=4, cls=NpEncoder)
     
-    if "history" in results_dict:
+    if "history" in results_dict and results_dict["history"] is not None:
         history_path = os.path.join(save_dir, f"{model_name.lower()}_training_history.json")
         with open(history_path, "w") as f:
             json.dump(results_dict["history"].history, f, indent=4, cls=NpEncoder)
@@ -198,7 +201,7 @@ def plot_hourly_error_heatmap(model_results_dict):
         # Calculate Absolute Error for every single step across all test samples
         absolute_errors = np.abs(y_true - y_pred)
         
-        # Average the errors across all samples to get the mean error per step (Shape: 96)
+        # Average the errors across all samples to get the mean error per step
         mean_step_errors = np.mean(absolute_errors, axis=0)
         
         # Group the 96 15-minute intervals into 24 hours (averaging every 4 steps)
@@ -251,7 +254,7 @@ def plot_uncertainty_bounds(chronos_results_dict, sample_idx=0, horizon=96):
     plt.plot(y_true, color='black', label='Actual Load', linewidth=2)
     plt.plot(y_pred, color='red', linestyle='--', label='Chronos Median Forecast (P50)')
     
-    # The Magic: Fill the area between the 10th and 90th percentile bounds
+    # Fill the area between the 10th and 90th percentile bounds
     plt.fill_between(range(horizon), y_lower, y_upper, color='red', alpha=0.15, 
                      label='80% Confidence Interval (P10 - P90)')
     
@@ -323,8 +326,81 @@ def evaluate_statistical_significance(y_true, y_pred_a, y_pred_b, model_a_name, 
     alpha = 0.05
     if p_value < alpha:
         winner = model_a_name if mean_err_a < mean_err_b else model_b_name
-        print(f"CONCLUSION: The difference IS statistically significant (p < {alpha}).")
+        print(f"The difference IS statistically significant (p < {alpha}).")
         print(f"{winner} is mathematically superior.")
     else:
-        print(f"CONCLUSION: The difference is NOT statistically significant (p >= {alpha}).")
+        print(f"The difference is NOT statistically significant (p >= {alpha}).")
         print(" Both models perform practically the same within statistical variance.")
+
+
+def diebold_mariano_test(y_true, y_pred_1, y_pred_2, h=1):
+    """
+    Computes the Diebold-Mariano test for the equality of forecast accuracy.
+    Assumes a step-ahead horizon of h.
+    """
+    e1 = np.abs(y_true - y_pred_1)
+    e2 = np.abs(y_true - y_pred_2)
+    
+    d = e1 - e2
+    mean_d = np.mean(d)
+    
+    T = float(len(d))
+    gamma = []
+    for lag in range(0, h):
+        cov = np.sum((d[lag:] - mean_d) * (d[:len(d)-lag] - mean_d)) / T
+        gamma.append(cov)
+        
+    var_d = gamma[0] + 2 * sum(gamma[1:])
+    
+    if var_d == 0 or np.isnan(var_d):
+        return 0.0, 1.0
+        
+    dm_stat = mean_d / np.sqrt(var_d / T)
+    p_value = 2 * (1 - norm.cdf(abs(dm_stat)))
+    
+    return dm_stat, p_value
+
+def run_statistical_significance_tests(model_results_dict, best_model_name, alpha=0.05):
+    print("\nStatistical Significance Testing")
+    print(f"Reference Model: {best_model_name}")
+
+    active_h = config.HORIZON_STEPS[config.ACTIVE_HORIZON] 
+    
+    if best_model_name not in model_results_dict:
+        raise ValueError(f"Model '{best_model_name}' not found in the provided dictionary.")
+        
+    y_true = model_results_dict[best_model_name]['y_test_real'].flatten()
+    best_preds = model_results_dict[best_model_name]['predictions'].flatten()
+    
+    results = []
+    p_values = []
+    
+    for model_name, data in model_results_dict.items():
+        if model_name == best_model_name:
+            continue
+            
+        compared_preds = data['predictions'].flatten()
+        dm_stat, p_val = diebold_mariano_test(y_true, best_preds, compared_preds, h=active_h)
+        
+        p_values.append(p_val)
+        results.append({
+            "Evaluated_Model": model_name,
+            "DM_Statistic": dm_stat,
+            "Raw_p_value": p_val
+        })
+        
+    reject_null, corrected_p_values, _, _ = multipletests(p_values, alpha=alpha, method='fdr_bh')
+    
+    for i, res in enumerate(results):
+        res["Corrected_p_value"] = corrected_p_values[i]
+        res["Statistically_Significant"] = reject_null[i]
+        
+        if reject_null[i]:
+            res["Superior_Model"] = best_model_name if res["DM_Statistic"] < 0 else res["Evaluated_Model"]
+        else:
+            res["Superior_Model"] = "Inconclusive"
+            
+    stats_df = pd.DataFrame(results).sort_values("Corrected_p_value")
+    
+    display(stats_df)
+    return stats_df
