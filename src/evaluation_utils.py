@@ -268,30 +268,34 @@ def plot_uncertainty_bounds(chronos_results_dict, sample_idx=0, horizon=96):
     plt.tight_layout()
     plt.show()
 
-def run_all_residual_diagnostics(y_true, y_pred, model_name, horizon_idx=0):
+def run_all_residual_diagnostics(y_true, y_pred, model_name, time_index, horizon_idx=0):
     """
     y_true/y_pred: Expected shape (samples, horizon)
+    time_index: The datetime index corresponding to the test set predictions (e.g., df_test.index)
     horizon_idx: Which time-step to analyze (0 = 15-min ahead)
     """
     # Isolate the specific horizon step for analysis
     target_residuals = y_true[:, horizon_idx] - y_pred[:, horizon_idx]
     
+    # Dynamically find the horizon length (number of steps per day)
+    horizon_length = y_true.shape[1] 
+    
     print(f"\n--- DIAGNOSTICS FOR {model_name.upper()} (Step: {horizon_idx}) ---")
     
-    # 1. ACF/PACF
+    # ACF/PACF (Dynamically set lags to 1 full day)
     fig, ax = plt.subplots(1, 2, figsize=(15, 3))
-    plot_acf(target_residuals, lags=48, ax=ax[0], title=f"{model_name} ACF")
-    plot_pacf(target_residuals, lags=48, ax=ax[1], title=f"{model_name} PACF")
+    plot_acf(target_residuals, lags=horizon_length, ax=ax[0], title=f"{model_name} ACF")
+    plot_pacf(target_residuals, lags=horizon_length, ax=ax[1], title=f"{model_name} PACF")
     plt.tight_layout()
     plt.show()
     
-    # 2. Shapiro-Wilk
+    # Shapiro-Wilk
     stat, p = stats.shapiro(target_residuals)
     print(f"Shapiro-Wilk P-Value: {p:.4e}")
     
-    # 3. Mean Bias by Hour
-    # Create a DataFrame for grouping
-    res_df = pd.DataFrame({'res': target_residuals}, index=df_test.index[:len(target_residuals)])
+    # Mean Bias by Hour
+    safe_index = time_index[:len(target_residuals)]
+    res_df = pd.DataFrame({'res': target_residuals}, index=safe_index)
     hourly = res_df.groupby(res_df.index.hour).mean()
     
     plt.figure(figsize=(8, 3))

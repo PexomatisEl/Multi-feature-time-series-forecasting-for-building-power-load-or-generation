@@ -21,7 +21,7 @@ from tqdm.auto import tqdm
 
 def run_power_lstm(X_train, y_train, X_val, y_val, X_test, y_test, 
                    horizon_name, horizon, epochs, batch_size, random_state, 
-                   experiment_name="Power_LSTM",  # <--- ADD THIS
+                   experiment_name="Power_LSTM",
                    target_scaler=None, train_from_scratch=False):
     
     lstm_cfg = config.LSTM_CONFIG
@@ -321,7 +321,7 @@ def run_keras_patchtst(X_train, y_train, X_val, y_val, X_test, y_test,
         print(f"Loading cached inferences from {cache_path}")
         loaded = np.load(cache_path)
         if os.path.exists(model_save_path):
-            model.load_weights(model_save_path) # <--- Safe load!
+            model.load_weights(model_save_path)
         return {
             'model': model,
             'predictions': loaded['predictions'],
@@ -335,7 +335,7 @@ def run_keras_patchtst(X_train, y_train, X_val, y_val, X_test, y_test,
     # TRAINING OR LOADING (If cache is missing)
     if not train_from_scratch and os.path.exists(model_save_path):
         print(f"Loading pre-trained weights from {model_save_path}")
-        model.load_weights(model_save_path) # <--- Safe load!
+        model.load_weights(model_save_path)
     else:
         print(f"Training PatchTST for {horizon} steps")
         early_stop = EarlyStopping(monitor='val_loss', patience=train_cfg["early_stopping_patience"], restore_best_weights=True)
@@ -348,7 +348,7 @@ def run_keras_patchtst(X_train, y_train, X_val, y_val, X_test, y_test,
             validation_data=(X_val, y_val), 
             callbacks=[early_stop, lr_scheduler], verbose=1 
         )
-        # Explicitly save model to make sure weights generate
+        # save model to make sure weights generate
         os.makedirs(cache_dir, exist_ok=True)
         model.save(model_save_path)
 
@@ -395,7 +395,7 @@ def run_chronos_univariate(df, target_col='energy_consumption', horizon_name="15
     horizon = config.HORIZON_STEPS[horizon_name]
     clean_model_name = model_name.replace("/", "_")
     
-    # Use custom experiment name if provided, otherwise default to the clean model name
+    # Use custom experiment name if provided
     exp_dir_name = experiment_name if experiment_name else clean_model_name
     
     print(f"\n RUNNING CHRONOS ZERO-SHOT ({exp_dir_name}) | Horizon: {horizon}")
@@ -423,7 +423,7 @@ def run_chronos_univariate(df, target_col='energy_consumption', horizon_name="15
         
     else:
         # Full Inference Pipeline
-        print(f"Loading {model_name}...")
+        print(f"Loading {model_name}")
         device_map = "cuda" if torch.cuda.is_available() else "cpu"
         
         if torch.cuda.is_available():

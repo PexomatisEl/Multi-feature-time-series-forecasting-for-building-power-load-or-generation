@@ -68,14 +68,14 @@ class ThesisDataPipeline:
         if 'smp' in df_clean.columns:
             df_clean['smp'] = df_clean['smp'].ffill()
 
-        # BIN 1: Small Gaps (<= 2 hours) -> Linear Interpolation
+        # BIN 1: Small Gaps (<= 2 hours) - Linear Interpolation
 
         bin1_hours = config.IMPUTATION_BINS["bin1_threshold_hours"]
         limit_steps = int(self.native_steps_per_hour * bin1_hours)
         df_clean = df_clean.interpolate(method='linear', limit=limit_steps)
         
 
-        # BIN 2: Medium Gaps (<= 1 week) -> Strictly Homologous Causal Blend
+        # BIN 2: Medium Gaps (<= 1 week) = Homologous Causal Blend
         # Only blends multiples of 1 week to preserve working environment shift schedules
 
         steps_168h = int(168 * self.native_steps_per_hour)
@@ -93,7 +93,7 @@ class ThesisDataPipeline:
                 df_clean[col] = df_clean[col].fillna(final_patch)
 
 
-        # BIN 3: Large Gaps (> 1 week) -> Strictly Causal Macro-Patch
+        # BIN 3: Large Gaps (> 1 week) = Causal Macro-Patch
 
         steps_52_weeks = int(52 * 7 * 24 * self.native_steps_per_hour)
         steps_4_weeks = int(4 * 7 * 24 * self.native_steps_per_hour) 
